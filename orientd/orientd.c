@@ -11,6 +11,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <fcntl.h>
 
 #include <hardware/hardware.h>
 #include <hardware/sensors.h>
@@ -21,6 +24,7 @@ static int open_sensors(struct sensors_module_t **sensors,
 			struct sensors_poll_device_t **device);
 static int poll_sensor_data(struct sensors_poll_device_t *device,
 			    struct dev_orientation *cur_orientation);
+static void daemon_init(void);
 
 int main(int argc, char **argv)
 {
@@ -32,21 +36,68 @@ int main(int argc, char **argv)
 
 	/********** Demo code begins **********/
 	/* Replace demo code with your daemon */
+	daemon_init();
+
 	struct dev_orientation orientation;
 
 	while (true) {
 		if (poll_sensor_data(device, &orientation)) {
-			printf("No data received!\n");
+			//printf("No data received!\n");
 		} else {
-			printf("azimuth = %d, pitch = %d, roll = %d\n",
+			/*printf("azimuth = %d, pitch = %d, roll = %d\n",
 			       orientation.azimuth, orientation.pitch,
-			       orientation.roll);
+			       orientation.roll);*/
+			set_orientation(&orientation);
 		}
 		usleep(100000);
 	}
 	/*********** Demo code ends ***********/
 
 	return EXIT_SUCCESS;
+}
+/**
+ *Daemonized function
+ *Reference for making daemon:
+ *https://codingfreak.blogspot.com/2012/03/daemon-izing-process-in-linux.html
+ *http://www.netzmafia.de/skripten/unix/linux-daemon-howto.html
+ */
+static void daemon_init(void)
+{
+	pid_t pid, sid;
+	int fd;
+
+	/*Already daemon*/
+	if (getppid() == 1)
+		return;
+	pid = fork();
+	if (pid < 0) {
+		exit(EXIT_FAILURE);
+	}
+	/*Kill parent process*/
+	if (pid > 0) {
+		exit(EXIT_SUCCESS);
+	}
+	/*Reset file creation mask*/
+	umask(0);
+	/*Create unique sid*/
+	sid = setsid();
+	if (sid < 0) {
+		exit(EXIT_FAILURE);
+	}
+	/*Change work directory*/
+	if ((chdir("/")) < 0) {
+		exit(EXIT_FAILURE);
+	}
+	/*Redirect useless file descriptors*/
+	fd = open("/dev/null", O_RDWR, 0);
+	
+	if (fd != -1) {
+		dup2(fd, STDIN_FILENO);
+		dup2(fd, STDOUT_FILENO);
+		dup2(fd, STDERR_FILENO);
+		if (fd > 2)
+			close(fd);
+	}
 }
 
 /***************************** DO NOT TOUCH BELOW *****************************/

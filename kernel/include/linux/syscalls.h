@@ -66,6 +66,7 @@ struct perf_event_attr;
 struct file_handle;
 struct sigaltstack;
 union bpf_attr;
+struct dev_orientation;
 
 #include <linux/types.h>
 #include <linux/aio_abi.h>
@@ -890,3 +891,5 @@ asmlinkage long sys_membarrier(int cmd, int flags);
 asmlinkage long sys_mlock2(unsigned long start, size_t len, int flags);
 
 #endif
+
+asmlinkage long sys_set_orientation(struct dev_orientation *orient);
