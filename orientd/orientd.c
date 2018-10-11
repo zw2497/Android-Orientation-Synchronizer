@@ -20,11 +20,17 @@
 
 #include "orientd.h"
 
+#define __NR_set_orientation 326
+
 static int open_sensors(struct sensors_module_t **sensors,
 			struct sensors_poll_device_t **device);
 static int poll_sensor_data(struct sensors_poll_device_t *device,
 			    struct dev_orientation *cur_orientation);
 static void daemon_init(void);
+
+int set_orientation(struct dev_orientation *orient) {
+	return syscall(__NR_set_orientation, orient);
+}
 
 int main(int argc, char **argv)
 {
