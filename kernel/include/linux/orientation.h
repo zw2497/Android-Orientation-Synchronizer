@@ -16,4 +16,17 @@ struct orientation_range {
 	unsigned int roll_range;        /* +/- degrees around Y-axis */
 };
 
+struct orientevt {
+	bool status;
+	unsigned int evt_id;
+	//unsigned int num_proc; //Not useful right now.
+	struct orientation_range *orient;
+	wait_queue_head_t blocked_queue;
+	struct list_head evt_list;
+};
+
+struct orientevts {
+	unsigned int num_evts;
+	struct list_head evt_list;
+};
 #endif
