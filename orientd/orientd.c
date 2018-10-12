@@ -2,7 +2,7 @@
  * Columbia University
  * COMS W4118 Fall 2018
  * Homework 3 - orientd.c
- * teamN: UNI, UNI, UNI
+ * teamN: zw2497, UNI, UNI
  */
 
 #include <math.h>
@@ -19,8 +19,6 @@
 #include <hardware/sensors.h>
 
 #include "orientd.h"
-
-#define __NR_set_orientation 326
 
 static int open_sensors(struct sensors_module_t **sensors,
 			struct sensors_poll_device_t **device);
@@ -43,11 +41,8 @@ int main(int argc, char **argv)
 	struct dev_orientation orientation;
 
 	while (true) {
-		if (poll_sensor_data(device, &orientation)) {
-			//printf("No data received!\n"); //need to fix
-		} else {
-			set_orientation(&orientation);
-		}
+		poll_sensor_data(device, &orientation);
+		set_orientation(&orientation);
 		usleep(100000);
 	}
 	/*********** Demo code ends ***********/
@@ -63,21 +58,24 @@ int main(int argc, char **argv)
 static void daemon_init(void)
 {
 	pid_t pid, sid;
-	int fd;
 
 	/*Already daemon*/
 	if (getppid() == 1)
 		return;
+
 	pid = fork();
 	if (pid < 0) {
 		exit(EXIT_FAILURE);
 	}
+
 	/*Kill parent process*/
 	if (pid > 0) {
 		exit(EXIT_SUCCESS);
 	}
+
 	/*Reset file creation mask*/
-	umask(0);
+	umask(022);
+
 	/*Create unique sid*/
 	sid = setsid();
 	if (sid < 0) {
@@ -87,16 +85,11 @@ static void daemon_init(void)
 	if ((chdir("/")) < 0) {
 		exit(EXIT_FAILURE);
 	}
-	/*Redirect useless file descriptors*/
-	fd = open("/dev/null", O_RDWR, 0);
-	
-	if (fd != -1) {
-		dup2(fd, STDIN_FILENO);
-		dup2(fd, STDOUT_FILENO);
-		dup2(fd, STDERR_FILENO);
-		if (fd > 2)
-			close(fd);
-	}
+
+	/* Close out the standard file descriptors */
+	close(STDIN_FILENO);
+	close(STDOUT_FILENO);
+	close(STDERR_FILENO);
 }
 
 /***************************** DO NOT TOUCH BELOW *****************************/

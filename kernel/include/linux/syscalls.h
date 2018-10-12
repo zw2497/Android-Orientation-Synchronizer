@@ -891,9 +891,11 @@ asmlinkage long sys_membarrier(int cmd, int flags);
 
 asmlinkage long sys_mlock2(unsigned long start, size_t len, int flags);
 
-#endif
-
 asmlinkage long sys_set_orientation(struct dev_orientation __user *orient);
+
 asmlinkage long sys_orientevt_create(struct orientation_range __user *orient);
+
 asmlinkage long sys_orientevt_destroy(int event_id);
+
 asmlinkage long sys_orientevt_wait(int event_id);
+#endif
