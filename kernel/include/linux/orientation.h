@@ -28,7 +28,6 @@ struct orientevt {
 
 struct orientevts {
 	spinlock_t lock;
-	unsigned int num_evts;
 	struct list_head evt_list;
 };
 #endif

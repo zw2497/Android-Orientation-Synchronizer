@@ -15,7 +15,6 @@
 /*Global events data structure*/
 struct orientevts events_list = {
 .lock = __SPIN_LOCK_UNLOCKED(events_list.lock),
-.num_evts = 0,
 .evt_list.next = &events_list.evt_list,
 .evt_list.prev = &events_list.evt_list
 };
@@ -110,7 +109,6 @@ SYSCALL_DEFINE1(orientevt_create, struct orientation_range __user *, orient)
 
 	spin_lock(&events_list.lock);
 	event->evt_id = unique_id;
-	events_list.num_evts++;
 	list_add_tail(&event->evt_list, &events_list.evt_list);
 	spin_unlock(&events_list.lock);
  
@@ -131,8 +129,6 @@ SYSCALL_DEFINE1(orientevt_destroy, int, event_id)
 
 	if (event_id < 0)
 		return -EINVAL;
-	if (events_list.num_evts == 0)
-		return -EFAULT;
 
 	found = 0;
 	spin_lock(&events_list.lock);
@@ -142,7 +138,6 @@ SYSCALL_DEFINE1(orientevt_destroy, int, event_id)
 			event->close = 1;
 			/*Only deleted from events_list*/
 			list_del(&event->evt_list);
-			events_list.num_evts--;
 			found = 1;
 			break;
 		}
