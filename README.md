@@ -14,7 +14,6 @@ struct orientevt {
 
 struct orientevts {
 	spinlock_t lock;		/*spinlock for struct*/
-	unsigned int num_evts;		/*number of events*/
 	struct list_head evt_list;	/*event linked list*/
 }
 ```
