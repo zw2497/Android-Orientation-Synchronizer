@@ -8,19 +8,20 @@
 #include <linux/types.h>
 #include <linux/spinlock.h>
 #include <linux/wait.h>
+#include <linux/idr.h>
 #include <linux/orientation.h>
 #include <linux/kernel.h>
 
 /*Global events data structure*/
 struct orientevts events_list = {
+.lock = __SPIN_LOCK_UNLOCKED(events_list.lock),
 .num_evts = 0,
 .evt_list.next = &events_list.evt_list,
 .evt_list.prev = &events_list.evt_list
 };
-static unsigned int evts_count = 0; //Not atomic_t right now
 
-DEFINE_SPINLOCK(evts_lock); /*Lock for events data structure
-				maybe put inside structure?*/
+/*IDR for event id management*/
+DEFINE_IDR(evts_id);
 
 /* Helper function to determine whether an orientation is within a range. */
 static __always_inline bool orient_within_range(struct dev_orientation *orient,
@@ -51,17 +52,17 @@ SYSCALL_DEFINE1(set_orientation, struct dev_orientation __user *, orient)
 		return -EINVAL;
 	if (copy_from_user(&ori, orient, sizeof(struct dev_orientation)))
 		return -EFAULT;
-	printk("azimuth=%d, pitch=%d, roll=%d.\n",
-		ori.azimuth, ori.pitch, ori.roll); //Test code shows on klog
-	//Inform event_list to block/unblock
-	spin_lock(&evts_lock);
+	/*Update status for each event*/
+	spin_lock(&events_list.lock);
 	list_for_each(list, &events_list.evt_list) {
 		event = list_entry(list, struct orientevt, evt_list);
 		event->status = orient_within_range(&ori, event->orient);
-		if (event->status)
-			wake_up(&event->blocked_queue); //Wakeup func here
+		/*Only wake up when is caused by orient update*/
+		if (event->status && !event->close)
+			wake_up(&event->blocked_queue);
+
 	}
-	spin_unlock(&evts_lock);
+	spin_unlock(&events_list.lock);
 
 	return 0;
 }
@@ -74,6 +75,8 @@ SYSCALL_DEFINE1(orientevt_create, struct orientation_range __user *, orient)
 {
 	struct orientation_range *orient_rg;
 	struct orientevt *event;
+	void *id_temp;
+	int unique_id;
 	
 	if (orient == NULL)
 		return -EINVAL;
@@ -88,19 +91,29 @@ SYSCALL_DEFINE1(orientevt_create, struct orientation_range __user *, orient)
 	
 
 	event->status = 0;
-	//event->num_proc = 0;  //Not useful right now.
+	event->close = 0;
+	atomic_set(&event->num_proc, 0);
 	event->orient = orient_rg;
-	//Maybe alternatives to initialize lock in wait queue
 	event->blocked_queue.lock
 		= __SPIN_LOCK_UNLOCKED(event->blocked_queue.lock);
 	INIT_LIST_HEAD(&event->blocked_queue.task_list);
 	INIT_LIST_HEAD(&event->evt_list);
 
-	spin_lock(&evts_lock);
-	event->evt_id = evts_count++; //need lock & evts_count overflow & prefer spinlock
-	events_list.num_evts++; //need lock
-	list_add_tail(&event->evt_list, &events_list.evt_list); //need lock
-	spin_unlock(&evts_lock);
+	/*IDR event id allocation*/
+	idr_preload(GFP_KERNEL);
+	spin_lock(&evts_id.lock);
+	unique_id = idr_alloc(&evts_id, id_temp, 1, 100, GFP_KERNEL);
+	spin_unlock(&evts_id.lock);
+	idr_preload_end();
+	if (unique_id < 0)
+		return -EFAULT;
+
+	spin_lock(&events_list.lock);
+	event->evt_id = unique_id;
+	events_list.num_evts++;
+	list_add_tail(&event->evt_list, &events_list.evt_list);
+	spin_unlock(&events_list.lock);
+ 
 
 	return event->evt_id;
 }
@@ -114,75 +127,90 @@ SYSCALL_DEFINE1(orientevt_destroy, int, event_id)
 {
 	struct list_head *list;
 	struct orientevt *event;
+	int found;
 
 	if (event_id < 0)
 		return -EINVAL;
 	if (events_list.num_evts == 0)
-		return -EFAULT; //Other alternatives
+		return -EFAULT;
 
-	spin_lock(&evts_lock);
-	list_for_each(list, &events_list.evt_list) { //need lock
+	found = 0;
+	spin_lock(&events_list.lock);
+	list_for_each(list, &events_list.evt_list) {
 		event = list_entry(list, struct orientevt, evt_list);
 		if (event->evt_id == event_id) {
-			//Wake up proc in blocked_queue
-			event->status = 1;
-			wake_up(&event->blocked_queue);
-			while (!list_empty(&event->blocked_queue.task_list))
-				;
+			event->close = 1;
+			/*Only deleted from events_list*/
 			list_del(&event->evt_list);
-			//Free kmalloc here, might need careful check
-			kfree(event->orient);
-			kfree(event);
 			events_list.num_evts--;
-			spin_unlock(&evts_lock);
-			return 0;
+			found = 1;
+			break;
 		}
 	}
-	spin_unlock(&evts_lock);
-	//Event not found
-	return -EFAULT;
+	spin_unlock(&events_list.lock);
+
+	if (!found)
+		return -EINVAL;
+
+	spin_lock(&evts_id.lock);
+	idr_remove(&evts_id, event_id);
+	spin_unlock(&evts_id.lock);
+	/*Make sure wait queue is empty*/
+	while(atomic_read(&event->num_proc) != 0)
+		wake_up(&event->blocked_queue);
+
+	spin_lock(&events_list.lock);
+	kfree(event->orient);
+	kfree(event);
+	spin_unlock(&events_list.lock);
+
+	return 0;
+
 }
 SYSCALL_DEFINE1(orientevt_wait, int, event_id)
 {
-	//Find event, add in wait queue, get sleep
 	int condition;
 	struct list_head *list;
 	struct orientevt *event;
-	/*wait queue defined here, though it's a local variable.
-	  But it worked and might need remedy.*/
-	struct __wait_queue wait; 
+	struct __wait_queue *wait; 
 
 	condition = -1;
-	spin_lock(&evts_lock);
-	list_for_each(list, &events_list.evt_list) { //need lock
+	spin_lock(&events_list.lock);
+	list_for_each(list, &events_list.evt_list) {
 		event = list_entry(list, struct orientevt, evt_list);
 		if (event->evt_id == event_id) {
 			condition = event->status;
 			break;
 		}
 	}
+	spin_unlock(&events_list.lock);
 
-	if (condition < 0) {
-		spin_unlock(&evts_lock);
-		return -EFAULT; //Other alternatives
-	}
-	if (condition) {
-		spin_unlock(&evts_lock);
-		return 0; //Other alternatives
-	}
 
-	/*No lock for entire procedure,
-	  though should not have race condition*/
-	spin_unlock(&evts_lock);
-	init_wait(&wait); //wait queue initialization
-	add_wait_queue(&event->blocked_queue, &wait); //Wait_queue lock inside
+	if (condition < 0)
+		return -EFAULT; // Event not found
+	if (condition)
+		return 0; //Event is active
+
+	wait = kmalloc(sizeof(struct __wait_queue), GFP_KERNEL);
+	if (!wait)
+		return -ENOMEM;
+
+	init_wait(wait);
+	add_wait_queue(&event->blocked_queue, wait);
+	atomic_inc(&event->num_proc);
+
 	while (!condition) {
-		prepare_to_wait(&event->blocked_queue, &wait, 
-				TASK_INTERRUPTIBLE); //Wait_queue lock inside
+		prepare_to_wait(&event->blocked_queue, wait, 
+				TASK_INTERRUPTIBLE);
 		schedule();
-		condition = event->status; //No lock, might need atomic
+		/*Orient update or event destroyed*/
+		condition = (event->status || event->close);
 	}
-	finish_wait(&event->blocked_queue, &wait);
+
+	finish_wait(&event->blocked_queue, wait);
+	kfree(wait);
+	atomic_dec(&event->num_proc);
+
 	return 0;
 }
 

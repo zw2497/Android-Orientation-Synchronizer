@@ -18,14 +18,16 @@ struct orientation_range {
 
 struct orientevt {
 	bool status;
+	bool close;
 	unsigned int evt_id;
-	//unsigned int num_proc; //Not useful right now.
+	atomic_t num_proc;
 	struct orientation_range *orient;
 	wait_queue_head_t blocked_queue;
 	struct list_head evt_list;
 };
 
 struct orientevts {
+	spinlock_t lock;
 	unsigned int num_evts;
 	struct list_head evt_list;
 };

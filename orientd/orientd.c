@@ -41,8 +41,9 @@ int main(int argc, char **argv)
 	struct dev_orientation orientation;
 
 	while (true) {
-		poll_sensor_data(device, &orientation);
-		set_orientation(&orientation);
+		if (!poll_sensor_data(device, &orientation))
+			set_orientation(&orientation);
+
 		usleep(100000);
 	}
 	/*********** Demo code ends ***********/
