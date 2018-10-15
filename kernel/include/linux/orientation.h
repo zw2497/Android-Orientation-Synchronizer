@@ -23,11 +23,5 @@ struct orientevt {
 	atomic_t num_proc;
 	struct orientation_range *orient;
 	wait_queue_head_t blocked_queue;
-	struct list_head evt_list;
-};
-
-struct orientevts {
-	spinlock_t lock;
-	struct list_head evt_list;
 };
 #endif

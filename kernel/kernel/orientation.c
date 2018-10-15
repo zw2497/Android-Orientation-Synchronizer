@@ -12,15 +12,10 @@
 #include <linux/orientation.h>
 #include <linux/kernel.h>
 
-/*Global events data structure*/
-struct orientevts events_list = {
-.lock = __SPIN_LOCK_UNLOCKED(events_list.lock),
-.evt_list.next = &events_list.evt_list,
-.evt_list.prev = &events_list.evt_list
-};
 
 /*IDR for event id management*/
-DEFINE_IDR(evts_id);
+DEFINE_IDR(event_idr);
+struct dev_orientation ori;
 
 /* Helper function to determine whether an orientation is within a range. */
 static __always_inline bool orient_within_range(struct dev_orientation *orient,
@@ -37,31 +32,32 @@ static __always_inline bool orient_within_range(struct dev_orientation *orient,
 		&& (!range->roll_range || roll_diff <= range->roll_range
 			|| 360 - roll_diff <= range->roll_range);
 }
+static void do_notify(int event_id, struct orientevt *event)
+{
+	event->status = orient_within_range(&ori, event->orient);
+	if (event->status && !event->close)
+		wake_up(&event->blocked_queue);
+}
+
+static int event_notify(int event_id, void *event, void *data)
+{
+	do_notify(event_id, event);
+	return 0;
+}
 /*
  * Sets current device orientation in the kernel.
  * System call number 326.
  */
 SYSCALL_DEFINE1(set_orientation, struct dev_orientation __user *, orient)
-{
-	struct dev_orientation ori;
-	struct orientevt *event;
-	struct list_head *list;
-	
+{	
 	if (orient == NULL)
 		return -EINVAL;
 	if (copy_from_user(&ori, orient, sizeof(struct dev_orientation)))
 		return -EFAULT;
 	/*Update status for each event*/
-	spin_lock(&events_list.lock);
-	list_for_each(list, &events_list.evt_list) {
-		event = list_entry(list, struct orientevt, evt_list);
-		event->status = orient_within_range(&ori, event->orient);
-		/*Only wake up when is caused by orient update*/
-		if (event->status && !event->close)
-			wake_up(&event->blocked_queue);
-
-	}
-	spin_unlock(&events_list.lock);
+	spin_lock(&event_idr.lock);
+	idr_for_each(&event_idr, &event_notify, NULL);
+	spin_unlock(&event_idr.lock);
 
 	return 0;
 }
@@ -74,7 +70,6 @@ SYSCALL_DEFINE1(orientevt_create, struct orientation_range __user *, orient)
 {
 	struct orientation_range *orient_rg;
 	struct orientevt *event;
-	void *id_temp;
 	int unique_id;
 	
 	if (orient == NULL)
@@ -96,23 +91,20 @@ SYSCALL_DEFINE1(orientevt_create, struct orientation_range __user *, orient)
 	event->blocked_queue.lock
 		= __SPIN_LOCK_UNLOCKED(event->blocked_queue.lock);
 	INIT_LIST_HEAD(&event->blocked_queue.task_list);
-	INIT_LIST_HEAD(&event->evt_list);
 
 	/*IDR event id allocation*/
 	idr_preload(GFP_KERNEL);
-	spin_lock(&evts_id.lock);
-	unique_id = idr_alloc(&evts_id, id_temp, 1, 100, GFP_KERNEL);
-	spin_unlock(&evts_id.lock);
+	spin_lock(&event_idr.lock);
+	unique_id = idr_alloc(&event_idr, event, 1, 100, GFP_KERNEL);
+	spin_unlock(&event_idr.lock);
 	idr_preload_end();
+
 	if (unique_id < 0)
 		return -EFAULT;
 
-	spin_lock(&events_list.lock);
+	spin_lock(&event_idr.lock);
 	event->evt_id = unique_id;
-	list_add_tail(&event->evt_list, &events_list.evt_list);
-	spin_unlock(&events_list.lock);
- 
-
+	spin_unlock(&event_idr.lock);
 	return event->evt_id;
 }
 /*
@@ -123,7 +115,6 @@ SYSCALL_DEFINE1(orientevt_create, struct orientation_range __user *, orient)
  */
 SYSCALL_DEFINE1(orientevt_destroy, int, event_id)
 {
-	struct list_head *list;
 	struct orientevt *event;
 	int found;
 
@@ -131,33 +122,28 @@ SYSCALL_DEFINE1(orientevt_destroy, int, event_id)
 		return -EINVAL;
 
 	found = 0;
-	spin_lock(&events_list.lock);
-	list_for_each(list, &events_list.evt_list) {
-		event = list_entry(list, struct orientevt, evt_list);
-		if (event->evt_id == event_id) {
-			event->close = 1;
-			/*Only deleted from events_list*/
-			list_del(&event->evt_list);
-			found = 1;
-			break;
-		}
+	spin_lock(&event_idr.lock);
+	event = idr_find(&event_idr, event_id);
+	if (event == NULL) {
+		spin_unlock(&event_idr.lock);
+		return -EFAULT; // Event not found
 	}
-	spin_unlock(&events_list.lock);
+	event->close = 1;
+	found = 1;
+	spin_unlock(&event_idr.lock);
 
 	if (!found)
 		return -EINVAL;
 
-	spin_lock(&evts_id.lock);
-	idr_remove(&evts_id, event_id);
-	spin_unlock(&evts_id.lock);
 	/*Make sure wait queue is empty*/
 	while(atomic_read(&event->num_proc) != 0)
 		wake_up(&event->blocked_queue);
 
-	spin_lock(&events_list.lock);
+	spin_lock(&event_idr.lock);
+	idr_remove(&event_idr, event_id);
 	kfree(event->orient);
 	kfree(event);
-	spin_unlock(&events_list.lock);
+	spin_unlock(&event_idr.lock);
 
 	return 0;
 
@@ -165,24 +151,18 @@ SYSCALL_DEFINE1(orientevt_destroy, int, event_id)
 SYSCALL_DEFINE1(orientevt_wait, int, event_id)
 {
 	int condition;
-	struct list_head *list;
 	struct orientevt *event;
 	struct __wait_queue *wait; 
 
-	condition = -1;
-	spin_lock(&events_list.lock);
-	list_for_each(list, &events_list.evt_list) {
-		event = list_entry(list, struct orientevt, evt_list);
-		if (event->evt_id == event_id) {
-			condition = event->status;
-			break;
-		}
-	}
-	spin_unlock(&events_list.lock);
-
-
-	if (condition < 0)
+	spin_lock(&event_idr.lock);
+	event = idr_find(&event_idr, event_id);
+	if (event == NULL) {
+		spin_unlock(&event_idr.lock);
 		return -EFAULT; // Event not found
+	}
+	condition = event->status;
+	spin_unlock(&event_idr.lock);
+
 	if (condition)
 		return 0; //Event is active
 
@@ -201,11 +181,14 @@ SYSCALL_DEFINE1(orientevt_wait, int, event_id)
 		/*Orient update or event destroyed*/
 		condition = (event->status || event->close);
 	}
-
 	finish_wait(&event->blocked_queue, wait);
 	kfree(wait);
-	atomic_dec(&event->num_proc);
 
+	condition = event->close;
+
+	atomic_dec(&event->num_proc);
+	if (condition)
+		return -EFAULT;
 	return 0;
 }
 
