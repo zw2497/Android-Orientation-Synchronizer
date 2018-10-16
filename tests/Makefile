@@ -4,10 +4,15 @@ LD = $(NDK_PATH)/clang
 ########## YOUR MAKEFILE BELOW ##########
 CFLAGS := -g -O2 -Wall -Werror
 
-test: test.c
-	$(CC) $(CFLAGS) -o test test.c 
+all: test1 test2
+
+test1: test1.c
+	$(CC) $(CFLAGS) -o test1 test1.c 
+
+test2: test2.c
+	$(CC) $(CFLAGS) -o test2 test2.c 
 
 .PHONY: clean
 
 clean:
-	rm -f test
+	rm -f test1 test2

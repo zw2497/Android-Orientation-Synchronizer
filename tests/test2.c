@@ -9,9 +9,11 @@
 #define __NR_orientevt_create	327
 #define __NR_orientevt_destroy	328
 #define __NR_orientevt_wait	329
+
 /*Multiple of 2*/
-#define CHILD_PROC		4
-#define TEST_SEC		10
+#define CHILD_PROC		24
+#define TEST_SEC		60
+#define RANGE			5
 
 struct dev_orientation {
 	int azimuth; /* angle between the magnetic north and the Y axis, around the
@@ -39,6 +41,7 @@ static inline int orientevt_wait(int event_id)
 {
 	return syscall(__NR_orientevt_wait, event_id);
 }
+
 int main(int argc, char **argv)
 {
 	int count, status, b[2], pids[CHILD_PROC];
@@ -48,18 +51,18 @@ int main(int argc, char **argv)
 	range.orient.azimuth = 0;
 	range.orient.pitch = 0;
 	range.orient.roll = 0;
-	range.azimuth_range = 5;
-	range.pitch_range = 5;
-	range.roll_range = 5;
+	range.azimuth_range = RANGE;
+	range.pitch_range = RANGE;
+	range.roll_range = RANGE;
 
 	b[0] = orientevt_create(&range);
 	
 	range.orient.azimuth = 180;
 	range.orient.pitch = 0;
 	range.orient.roll = 180;
-	range.azimuth_range = 5;
-	range.pitch_range = 5;
-	range.roll_range = 5;
+	range.azimuth_range = RANGE;
+	range.pitch_range = RANGE;
+	range.roll_range = RANGE;
 	
 	b[1] = orientevt_create(&range);
 
@@ -68,11 +71,11 @@ int main(int argc, char **argv)
 		if (pid < 0)
 			return -1;
 		if (pid == 0) {
-			if (i < CHILD_PROC/2) {
+			if (i % 2 == 0) {
 				while (1) {
 					if (orientevt_wait(b[0]) < 0)
 						break;
-					printf("%d:facing up!\n", i);
+					printf("%d: facing up!\n", i);
 					usleep(1000000);
 				}
 				exit(0);
@@ -80,7 +83,7 @@ int main(int argc, char **argv)
 				while (1) {
 					if (orientevt_wait(b[1]) < 0)
 						break;
-					printf("%d:facing down!\n", i);
+					printf("%d: facing down!\n", i);
 					usleep(1000000);
 				}
 				exit(0);
@@ -99,8 +102,8 @@ int main(int argc, char **argv)
 
 	orientevt_destroy(b[0]);
 	orientevt_destroy(b[1]);
+
 	for (int i = 0; i < CHILD_PROC; i++) {
-		printf("Waiting for %d\n", i);
 		waitpid(pids[i], &status, 0);
 	}
 
