@@ -49,7 +49,7 @@ static int event_notify(int event_id, void *event, void *data)
  * System call number 326.
  */
 SYSCALL_DEFINE1(set_orientation, struct dev_orientation __user *, orient)
-{	
+{
 	if (orient == NULL)
 		return -EINVAL;
 	if (copy_from_user(&ori, orient, sizeof(struct dev_orientation)))
@@ -71,7 +71,7 @@ SYSCALL_DEFINE1(orientevt_create, struct orientation_range __user *, orient)
 	struct orientation_range *orient_rg;
 	struct orientevt *event;
 	int unique_id;
-	
+
 	if (orient == NULL)
 		return -EINVAL;
 	orient_rg = kmalloc(sizeof(struct orientation_range), GFP_KERNEL);
@@ -82,7 +82,7 @@ SYSCALL_DEFINE1(orientevt_create, struct orientation_range __user *, orient)
 	if (copy_from_user(orient_rg, orient,
 			sizeof(struct orientation_range)))
 		return -EFAULT;
-	
+
 
 	event->status = 0;
 	event->close = 0;
@@ -126,7 +126,8 @@ SYSCALL_DEFINE1(orientevt_destroy, int, event_id)
 	event = idr_find(&event_idr, event_id);
 	if (event == NULL) {
 		spin_unlock(&event_idr.lock);
-		return -EFAULT; // Event not found
+		/* Event not found */
+		return -EFAULT;
 	}
 	event->close = 1;
 	found = 1;
@@ -135,8 +136,8 @@ SYSCALL_DEFINE1(orientevt_destroy, int, event_id)
 	if (!found)
 		return -EINVAL;
 
-	/*Make sure wait queue is empty*/
-	while(atomic_read(&event->num_proc) != 0)
+	/* Make sure wait queue is empty */
+	while (atomic_read(&event->num_proc) != 0)
 		wake_up(&event->blocked_queue);
 
 	spin_lock(&event_idr.lock);
@@ -152,19 +153,21 @@ SYSCALL_DEFINE1(orientevt_wait, int, event_id)
 {
 	int condition;
 	struct orientevt *event;
-	struct __wait_queue *wait; 
+	struct __wait_queue *wait;
 
 	spin_lock(&event_idr.lock);
 	event = idr_find(&event_idr, event_id);
 	if (event == NULL) {
 		spin_unlock(&event_idr.lock);
-		return -EFAULT; // Event not found
+		/* Event not found */
+		return -EFAULT;
 	}
 	condition = event->status;
 	spin_unlock(&event_idr.lock);
 
+	/* Event is active */
 	if (condition)
-		return 0; //Event is active
+		return 0;
 
 	wait = kmalloc(sizeof(struct __wait_queue), GFP_KERNEL);
 	if (!wait)
@@ -175,7 +178,7 @@ SYSCALL_DEFINE1(orientevt_wait, int, event_id)
 	atomic_inc(&event->num_proc);
 
 	while (!condition) {
-		prepare_to_wait(&event->blocked_queue, wait, 
+		prepare_to_wait(&event->blocked_queue, wait,
 				TASK_INTERRUPTIBLE);
 		schedule();
 		/*Orient update or event destroyed*/

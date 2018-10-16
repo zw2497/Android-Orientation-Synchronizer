@@ -65,27 +65,24 @@ static void daemon_init(void)
 		return;
 
 	pid = fork();
-	if (pid < 0) {
+	if (pid < 0)
 		exit(EXIT_FAILURE);
-	}
 
 	/*Kill parent process*/
-	if (pid > 0) {
+	if (pid > 0)
 		exit(EXIT_SUCCESS);
-	}
 
 	/*Reset file creation mask*/
 	umask(022);
 
 	/*Create unique sid*/
 	sid = setsid();
-	if (sid < 0) {
+	if (sid < 0)
 		exit(EXIT_FAILURE);
-	}
+
 	/*Change work directory*/
-	if ((chdir("/")) < 0) {
+	if ((chdir("/")) < 0)
 		exit(EXIT_FAILURE);
-	}
 
 	/* Close out the standard file descriptors */
 	close(STDIN_FILENO);

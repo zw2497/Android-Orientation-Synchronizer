@@ -15,8 +15,8 @@
 #define RANGE			5
 
 struct dev_orientation {
-	int azimuth; /* angle between the magnetic north and the Y axis, around the
-		      * Z axis (-180<=azimuth<=180)
+	int azimuth; /* angle between the magnetic north and the Y axis, around
+		      * the Z axis (-180<=azimuth<=180)
 		      */
 	int pitch;   /* rotation around the X-axis: -90<=pitch<=90 */
 	int roll;    /* rotation around Y-axis: +Y == -roll, -180<=roll<=180 */
@@ -54,14 +54,14 @@ int main(int argc, char **argv)
 	range.roll_range = RANGE;
 
 	b[0] = orientevt_create(&range);
-	
+
 	range.orient.azimuth = 180;
 	range.orient.pitch = 0;
 	range.orient.roll = 180;
 	range.azimuth_range = RANGE;
 	range.pitch_range = RANGE;
 	range.roll_range = RANGE;
-	
+
 	b[1] = orientevt_create(&range);
 
 	for (int i = 0; i < CHILD_PROC; i++) {
@@ -91,18 +91,17 @@ int main(int argc, char **argv)
 	}
 
 	count = 0;
-	while(1) {
+	while (1) {
 		if (count >= TEST_SEC)
 			break;
 		count++;
 		usleep(1000000);
-        }
+	}
 
 	orientevt_destroy(b[0]);
 	orientevt_destroy(b[1]);
-	for (int i = 0; i < CHILD_PROC; i++) {
+	for (int i = 0; i < CHILD_PROC; i++)
 		waitpid(pids[i], &status, 0);
-	}
 
 	return 0;
 }
