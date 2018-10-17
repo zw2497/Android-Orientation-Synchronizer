@@ -71,23 +71,13 @@ int main(int argc, char **argv)
 		if (pid < 0)
 			return -1;
 		if (pid == 0) {
-			if (i < CHILD_PROC/2) {
-				while (1) {
-					if (orientevt_wait(b[0]) < 0)
-						break;
-					printf("%d: facing up!\n", i);
-					usleep(1000000);
-				}
-				exit(0);
-			} else {
-				while (1) {
-					if (orientevt_wait(b[1]) < 0)
-						break;
-					printf("%d: facing down!\n", i);
-					usleep(1000000);
-				}
-				exit(0);
+			while (1) {
+				if (orientevt_wait(b[1]) < 0)
+					break;
+				printf("%d: facing down!\n", i);
+				usleep(1000000);
 			}
+			exit(0);
 		} else
 			pids[i] = pid;
 	}
